@@ -468,7 +468,8 @@ func cloneNodeWithMap(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) *yaml.No
 		return nil
 	}
 
-	clone := *n // copy value types (Kind, Style, Tag, Value, etc.)
+	clone := *n       // copy value types (Kind, Style, Tag, Value, etc.)
+	clone.Anchor = "" // Clear anchor name - cloned nodes shouldn't carry over anchor identities
 	clonePtr := &clone
 	oldToNew[n] = clonePtr
 
