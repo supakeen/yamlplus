@@ -395,6 +395,9 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 							resolved = resolved.Content[0]
 						}
 
+						// Clone before modifying to avoid mutating the anchor registry
+						resolved = cloneNode(resolved)
+
 						if err := l.replaceXrefs(resolved, stack); err != nil {
 							return err
 						}
