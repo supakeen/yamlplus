@@ -347,6 +347,7 @@ func (l *Loader) resolveDirectXRef(node *yaml.Node, stack map[string]bool) error
 	node.Style = clone.Style
 	node.Tag = clone.Tag
 	node.Value = clone.Value
+	node.Alias = clone.Alias
 	node.Content = clone.Content
 
 	// Keep the reference in stack during recursive processing to detect cycles,
