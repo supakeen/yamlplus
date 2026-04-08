@@ -1,56 +1,181 @@
-# `yamlplus`
+# yamlplus
 
-This is a small Go library that processes the Abstract Syntax Tree (AST) offered by `go.yaml.in/yaml/v3` to extend it with tags.
+A Go library that extends YAML with cross-file references, allowing you to split large configuration files into smaller, reusable pieces.
 
-## Usage
+## Features
+
+- Reference YAML anchors across multiple files using the `!xref` tag
+- Support for standard YAML map merges with cross-file references
+- Load files individually, by directory, or recursively
+- Built on top of `go.yaml.in/yaml/v3`
+- Circular dependency detection
+
+## Installation
+
+```bash
+go get github.com/supakeen/yamlplus
+```
+
+## Quick Start
+
+Given two YAML files:
+
+**database.yaml:**
+```yaml
+connection: &db-config
+  host: localhost
+  port: 5432
+  timeout: 30s
+```
+
+**app.yaml:**
+```yaml
+service:
+  name: myapp
+  database: !xref "database.yaml#db-config"
+```
+
+Load and unmarshal them:
 
 ```go
 package main
 
 import (
+    "fmt"
     "os"
-
     "github.com/supakeen/yamlplus"
 )
 
 func main() {
-    loader := yamlplus.NewLoader(os.DirFS("somepath"))
-
-    _ = loader.RegisterFile("one.yaml")
-    _ = loader.RegisterFile("two.yaml")
-
-    _ = loader.RegisterDirectory("dir")
-
-    _ = loader.RegisterRecursively("dir")
-
-    var output map[string]any
-
-    _ = loader.Unmarshal([]byte(`one: !xref "one.yaml#anchor"`), &output)
+    loader := yamlplus.NewLoader(os.DirFS("config"))
+    loader.RegisterFile("database.yaml")
+    
+    var config map[string]any
+    data, _ := os.ReadFile("config/app.yaml")
+    loader.Unmarshal(data, &config)
+    
+    // Access the cross-referenced database configuration
+    service := config["service"].(map[string]any)
+    db := service["database"].(map[string]any)
+    fmt.Printf("Database: %s:%d\n", db["host"], db["port"])
 }
 ```
 
-## Tags
+## Reference Syntax
 
-### `!xref`
+The `!xref` tag supports two forms:
 
-The `!xref` tag allows for cross-referencing anchors in other YAML files.
-
-```yaml
-config:
-  port: &port 3306
-```
+### Reference a specific anchor
 
 ```yaml
-other_config:
-  port: !xref config.yaml#port
+config: !xref "filename.yaml#anchorname"
 ```
 
-The syntax is `!xref` followed by the filename of the file the anchor appears in, a `#` and then the name of the anchor. You can reference an entire file by omitting the `#anchor` part. When referencing an entire file but that file contains multiple documents the first one will be used implicitly.
-
-`!xref` is also available for map merges:
+### Reference an entire file
 
 ```yaml
-config:
-  <<: !xref base.yaml#config
-  port: 3306
+config: !xref "filename.yaml"
 ```
+
+When referencing a file without an anchor, the first document in the file is used.
+
+## Map Merges
+
+Cross-file references work with YAML's map merge syntax:
+
+**defaults.yaml:**
+```yaml
+defaults: &api-defaults
+  timeout: 30s
+  retries: 3
+  log_level: info
+```
+
+**service.yaml:**
+```yaml
+production:
+  <<: !xref "defaults.yaml#api-defaults"
+  timeout: 60s        # Override the default
+  endpoint: /api/v1
+```
+
+Result after unmarshaling:
+```yaml
+production:
+  timeout: 60s
+  retries: 3
+  log_level: info
+  endpoint: /api/v1
+```
+
+## Loading Files
+
+### Load individual files
+
+```go
+loader := yamlplus.NewLoader(os.DirFS("config"))
+loader.RegisterFile("base.yaml")
+loader.RegisterFile("database.yaml")
+```
+
+### Load all YAML files in a directory
+
+```go
+loader.RegisterDirectory("configs")
+```
+
+This loads all `.yaml` and `.yml` files in the directory (non-recursive).
+
+### Load files recursively
+
+```go
+loader.RegisterRecursively("configs")
+```
+
+This walks the directory tree and loads all YAML files.
+
+## Path-Based Namespacing
+
+Files are registered and referenced using their exact path relative to the filesystem root:
+
+```go
+loader := yamlplus.NewLoader(os.DirFS("/etc"))
+loader.RegisterFile("app/config.yaml")
+
+// Must use the same path in references:
+data := []byte(`settings: !xref "app/config.yaml"`)
+```
+
+## Circular Dependency Detection
+
+The library detects circular references and returns an error:
+
+**a.yaml:**
+```yaml
+value: !xref "b.yaml"
+```
+
+**b.yaml:**
+```yaml
+value: !xref "a.yaml"
+```
+
+Attempting to unmarshal will result in an error: `circular dependency detected`.
+
+## Thread Safety
+
+A `Loader` is safe for concurrent `Unmarshal` calls after all files have been registered. However, `RegisterFile`, `RegisterDirectory`, and `RegisterRecursively` should not be called concurrently with each other or with `Unmarshal`.
+
+## Examples
+
+See the [examples in the documentation](https://pkg.go.dev/github.com/supakeen/yamlplus#pkg-examples) for more usage patterns.
+
+## Testing
+
+```bash
+go test ./...
+```
+
+## License
+
+MIT
