@@ -275,7 +275,7 @@ func (l *Loader) getAnchor(ref string) (*yaml.Node, error) {
 		return target, nil
 	}
 
-	return nil, fmt.Errorf("xref %q not found in registry %v", ref, l.anchorRegistry)
+	return nil, fmt.Errorf("xref %q not found in registry", ref)
 }
 
 // Scan a node and its children for any anchors and store them in the
