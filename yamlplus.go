@@ -453,16 +453,53 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 	if n == nil {
 		return nil
 	}
+
+	oldToNew := make(map[*yaml.Node]*yaml.Node)
+	clone := cloneNodeWithMap(n, oldToNew)
+
+	// fix up alias pointers to point to cloned nodes
+	fixAliases(clone, oldToNew)
+
+	return clone
+}
+
+func cloneNodeWithMap(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+
 	clone := *n // copy value types (Kind, Style, Tag, Value, etc.)
+	clonePtr := &clone
+	oldToNew[n] = clonePtr
 
 	if n.Content != nil {
 		clone.Content = make([]*yaml.Node, len(n.Content))
 		for i, child := range n.Content {
-			clone.Content[i] = cloneNode(child)
+			clone.Content[i] = cloneNodeWithMap(child, oldToNew)
 		}
 	}
-	return &clone
+
+	return clonePtr
 }
+
+func fixAliases(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) {
+	if n == nil {
+		return
+	}
+
+	// If this node has an Alias pointer, remap it to the cloned version
+	if n.Alias != nil {
+		if newAlias, ok := oldToNew[n.Alias]; ok {
+			n.Alias = newAlias
+		}
+	}
+
+	// Recursively fix aliases in children
+	for _, child := range n.Content {
+		fixAliases(child, oldToNew)
+	}
+}
+
 func hasYAMLSuffix(name string) bool {
 	suffix := strings.ToLower(path.Ext(name))
 	return suffix == ".yaml" || suffix == ".yml"
