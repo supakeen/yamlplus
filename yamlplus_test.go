@@ -1,7 +1,10 @@
 package yamlplus
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -1260,6 +1263,70 @@ api: !xref "configs/services/api.yaml"
 	// Service: api
 }
 
+// ExampleLoader_NewDecoder demonstrates using the streaming Decoder API with options.
+func ExampleLoader_NewDecoder() {
+	fs := fstest.MapFS{
+		"defaults.yaml": {Data: []byte(`
+defaults: &defaults
+  timeout: 30s
+  retries: 3
+`)},
+	}
+
+	loader := NewLoader(fs)
+	loader.RegisterFile("defaults.yaml")
+
+	type Config struct {
+		Timeout string `yaml:"timeout"`
+		Retries int    `yaml:"retries"`
+	}
+
+	input := strings.NewReader(`
+timeout: 10s
+retries: 5
+`)
+
+	dec := loader.NewDecoder(input)
+	dec.KnownFields(true)
+
+	var config Config
+	dec.Decode(&config)
+
+	fmt.Printf("Timeout: %s\n", config.Timeout)
+	fmt.Printf("Retries: %d\n", config.Retries)
+
+	// Output:
+	// Timeout: 10s
+	// Retries: 5
+}
+
+// ExampleLoader_NewDecoder_xref demonstrates decoding with xref resolution.
+func ExampleLoader_NewDecoder_xref() {
+	fs := fstest.MapFS{
+		"database.yaml": {Data: []byte(`
+host: localhost
+port: 5432
+`)},
+	}
+
+	loader := NewLoader(fs)
+	loader.RegisterFile("database.yaml")
+
+	input := strings.NewReader(`db: !xref "database.yaml"`)
+	dec := loader.NewDecoder(input)
+
+	var config map[string]any
+	dec.Decode(&config)
+
+	db := config["db"].(map[string]any)
+	fmt.Printf("Host: %s\n", db["host"])
+	fmt.Printf("Port: %d\n", db["port"])
+
+	// Output:
+	// Host: localhost
+	// Port: 5432
+}
+
 func TestNodeCloning(t *testing.T) {
 	loader := NewLoader(getMockFS())
 
@@ -1352,5 +1419,265 @@ config2: !xref "base.yaml#net"
 		// Other should be unaffected
 		assert.Equal(t, "30s", config2["timeout"])
 		assert.Equal(t, "modified", config1["timeout"])
+	})
+}
+
+func TestDecoder(t *testing.T) {
+	loader := NewLoader(getMockFS())
+
+	err := loader.RegisterFile("base.yaml")
+	assert.NoError(t, err)
+
+	err = loader.RegisterFile("database.yaml")
+	assert.NoError(t, err)
+
+	err = loader.RegisterFile("nested.yaml")
+	assert.NoError(t, err)
+
+	t.Run("basic decode matches unmarshal", func(t *testing.T) {
+		input := `net: !xref "base.yaml#net"`
+
+		var fromDecoder map[string]any
+		dec := loader.NewDecoder(strings.NewReader(input))
+		err := dec.Decode(&fromDecoder)
+		assert.NoError(t, err)
+
+		var fromUnmarshal map[string]any
+		err = loader.Unmarshal([]byte(input), &fromUnmarshal)
+		assert.NoError(t, err)
+
+		assert.Equal(t, fromUnmarshal, fromDecoder)
+	})
+
+	t.Run("direct xref through decoder", func(t *testing.T) {
+		var output map[string]any
+		dec := loader.NewDecoder(strings.NewReader(`db: !xref "database.yaml"`))
+
+		err := dec.Decode(&output)
+		assert.NoError(t, err)
+
+		db := output["db"].(map[string]any)
+		assert.Equal(t, 3306, db["port"])
+		assert.Equal(t, "root", db["user"])
+	})
+
+	t.Run("map merge xref through decoder", func(t *testing.T) {
+		input := `
+net:
+  <<: !xref "base.yaml#net"
+  timeout: 1s
+`
+		var output map[string]any
+		dec := loader.NewDecoder(strings.NewReader(input))
+
+		err := dec.Decode(&output)
+		assert.NoError(t, err)
+
+		net := output["net"].(map[string]any)
+		assert.Equal(t, "1s", net["timeout"])
+		assert.Equal(t, 3, net["retries"])
+	})
+
+	t.Run("nested xref through decoder", func(t *testing.T) {
+		var output map[string]any
+		dec := loader.NewDecoder(strings.NewReader(`start: !xref "nested.yaml"`))
+
+		err := dec.Decode(&output)
+		assert.NoError(t, err)
+
+		start := output["start"].(map[string]any)
+		next := start["next"].(map[string]any)
+		assert.Equal(t, 3306, next["port"])
+	})
+
+	t.Run("decode returns EOF on exhausted stream", func(t *testing.T) {
+		dec := loader.NewDecoder(strings.NewReader(`key: value`))
+
+		var output map[string]any
+		err := dec.Decode(&output)
+		assert.NoError(t, err)
+		assert.Equal(t, "value", output["key"])
+
+		err = dec.Decode(&output)
+		assert.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("streaming multi-document decode", func(t *testing.T) {
+		input := `---
+first: !xref "database.yaml"
+---
+second: !xref "base.yaml#net"
+`
+		dec := loader.NewDecoder(strings.NewReader(input))
+
+		var doc1 map[string]any
+		err := dec.Decode(&doc1)
+		assert.NoError(t, err)
+
+		first := doc1["first"].(map[string]any)
+		assert.Equal(t, 3306, first["port"])
+
+		var doc2 map[string]any
+		err = dec.Decode(&doc2)
+		assert.NoError(t, err)
+
+		second := doc2["second"].(map[string]any)
+		assert.Equal(t, "30s", second["timeout"])
+
+		var doc3 map[string]any
+		err = dec.Decode(&doc3)
+		assert.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("decode from bytes reader", func(t *testing.T) {
+		input := []byte(`db: !xref "database.yaml"`)
+		dec := loader.NewDecoder(bytes.NewReader(input))
+
+		var output map[string]any
+		err := dec.Decode(&output)
+		assert.NoError(t, err)
+
+		db := output["db"].(map[string]any)
+		assert.Equal(t, 3306, db["port"])
+	})
+
+	t.Run("invalid yaml through decoder", func(t *testing.T) {
+		dec := loader.NewDecoder(strings.NewReader(`invalid: yaml: [:`))
+
+		var output map[string]any
+		err := dec.Decode(&output)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing xref through decoder", func(t *testing.T) {
+		dec := loader.NewDecoder(strings.NewReader(`val: !xref "nonexistent.yaml"`))
+
+		var output map[string]any
+		err := dec.Decode(&output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in registry")
+	})
+
+	t.Run("circular dependency through decoder", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("cyclea.yaml")
+		assert.NoError(t, err)
+		err = loader.RegisterFile("cycleb.yaml")
+		assert.NoError(t, err)
+
+		dec := loader.NewDecoder(strings.NewReader(`start: !xref "cyclea.yaml"`))
+
+		var output map[string]any
+		err = dec.Decode(&output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "circular dependency")
+	})
+}
+
+func TestDecoderKnownFields(t *testing.T) {
+	loader := NewLoader(getMockFS())
+
+	err := loader.RegisterFile("base.yaml")
+	assert.NoError(t, err)
+
+	err = loader.RegisterFile("database.yaml")
+	assert.NoError(t, err)
+
+	type NetworkConfig struct {
+		Timeout string `yaml:"timeout"`
+		Retries int    `yaml:"retries"`
+	}
+
+	t.Run("known fields rejects unknown keys", func(t *testing.T) {
+		input := `
+timeout: 30s
+retries: 3
+unknown_field: oops
+`
+		dec := loader.NewDecoder(strings.NewReader(input))
+		dec.KnownFields(true)
+
+		var config NetworkConfig
+		err := dec.Decode(&config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown_field")
+	})
+
+	t.Run("known fields accepts valid keys", func(t *testing.T) {
+		input := `
+timeout: 30s
+retries: 3
+`
+		dec := loader.NewDecoder(strings.NewReader(input))
+		dec.KnownFields(true)
+
+		var config NetworkConfig
+		err := dec.Decode(&config)
+		assert.NoError(t, err)
+		assert.Equal(t, "30s", config.Timeout)
+		assert.Equal(t, 3, config.Retries)
+	})
+
+	t.Run("known fields disabled by default", func(t *testing.T) {
+		input := `
+timeout: 30s
+retries: 3
+extra: ignored
+`
+		dec := loader.NewDecoder(strings.NewReader(input))
+
+		var config NetworkConfig
+		err := dec.Decode(&config)
+		assert.NoError(t, err)
+		assert.Equal(t, "30s", config.Timeout)
+		assert.Equal(t, 3, config.Retries)
+	})
+
+	t.Run("known fields with xref resolution", func(t *testing.T) {
+		input := `net: !xref "base.yaml#net"`
+
+		type Wrapper struct {
+			Net NetworkConfig `yaml:"net"`
+		}
+
+		dec := loader.NewDecoder(strings.NewReader(input))
+		dec.KnownFields(true)
+
+		var config Wrapper
+		err := dec.Decode(&config)
+		assert.NoError(t, err)
+		assert.Equal(t, "30s", config.Net.Timeout)
+		assert.Equal(t, 3, config.Net.Retries)
+	})
+
+	t.Run("known fields rejects unknown keys after xref resolution", func(t *testing.T) {
+		input := `db: !xref "database.yaml"`
+
+		type Wrapper struct {
+			DB NetworkConfig `yaml:"db"`
+		}
+
+		dec := loader.NewDecoder(strings.NewReader(input))
+		dec.KnownFields(true)
+
+		var config Wrapper
+		err := dec.Decode(&config)
+		assert.Error(t, err)
+	})
+
+	t.Run("known fields with map merge xref", func(t *testing.T) {
+		input := `
+timeout: 1s
+retries: 3
+`
+		dec := loader.NewDecoder(strings.NewReader(input))
+		dec.KnownFields(true)
+
+		var config NetworkConfig
+		err := dec.Decode(&config)
+		assert.NoError(t, err)
+		assert.Equal(t, "1s", config.Timeout)
+		assert.Equal(t, 3, config.Retries)
 	})
 }

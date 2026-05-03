@@ -72,7 +72,9 @@
 package yamlplus
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"strings"
@@ -109,6 +111,77 @@ func NewLoader(f fs.FS) *Loader {
 		Filesystem:     f,
 		anchorRegistry: make(map[string]*yaml.Node),
 	}
+}
+
+// Decoder reads and decodes YAML values from an input stream, resolving
+// !xref tags using the Loader's anchor registry.
+//
+// A Decoder is created with [Loader.NewDecoder] and mirrors the API of
+// [go.yaml.in/yaml/v3.Decoder], adding cross-file reference resolution.
+type Decoder struct {
+	loader      *Loader
+	decoder     *yaml.Decoder
+	knownFields bool
+}
+
+// NewDecoder creates a new Decoder that reads from r and resolves !xref
+// tags using the loader's registered anchors.
+//
+// The returned Decoder supports all the same options as [go.yaml.in/yaml/v3.Decoder],
+// including [Decoder.KnownFields] for strict field checking.
+//
+// Example:
+//
+//	dec := loader.NewDecoder(reader)
+//	dec.KnownFields(true)
+//	var config Config
+//	err := dec.Decode(&config)
+func (l *Loader) NewDecoder(r io.Reader) *Decoder {
+	return &Decoder{
+		loader:  l,
+		decoder: yaml.NewDecoder(r),
+	}
+}
+
+// KnownFields configures whether the Decoder should fail on unknown fields.
+// When enabled, the Decoder will return an error if the YAML document contains
+// keys that do not map to exported fields in the target struct.
+//
+// This mirrors [go.yaml.in/yaml/v3.Decoder.KnownFields].
+func (d *Decoder) KnownFields(enable bool) {
+	d.knownFields = enable
+}
+
+// Decode reads the next YAML document from the Decoder's stream, resolves
+// all !xref tags, and stores the result in the value pointed to by out.
+//
+// Successive calls to Decode read successive documents from the stream.
+// When the stream is exhausted, Decode returns [io.EOF].
+//
+// See [Loader.Unmarshal] for details on !xref resolution behavior.
+func (d *Decoder) Decode(out any) error {
+	var root yaml.Node
+	if err := d.decoder.Decode(&root); err != nil {
+		return err
+	}
+
+	stack := make(map[string]bool)
+	if err := d.loader.replaceXrefs(&root, stack); err != nil {
+		return err
+	}
+
+	if d.knownFields {
+		data, err := yaml.Marshal(&root)
+		if err != nil {
+			return err
+		}
+
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		return dec.Decode(out)
+	}
+
+	return root.Decode(out)
 }
 
 // RegisterFile reads a YAML file and registers all its anchors for cross-referencing.
@@ -227,18 +300,7 @@ func (l *Loader) RegisterRecursively(dir string) error {
 //   - A circular dependency is detected
 //   - The data cannot be unmarshaled into out
 func (l *Loader) Unmarshal(data []byte, out any) error {
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return err
-	}
-
-	stack := make(map[string]bool)
-
-	if err := l.replaceXrefs(&root, stack); err != nil {
-		return err
-	}
-
-	return root.Decode(out)
+	return l.NewDecoder(bytes.NewReader(data)).Decode(out)
 }
 
 // Go through a YAML node and its children and replace occurrences of nodes that

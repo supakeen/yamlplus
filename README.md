@@ -6,6 +6,7 @@ A Go library that extends YAML with cross-file references, allowing you to split
 
 - Reference YAML anchors across multiple files using the `!xref` tag
 - Support for standard YAML map merges with cross-file references
+- Streaming `Decoder` API with options like `KnownFields`
 - Load files individually, by directory, or recursively
 - Built on top of `go.yaml.in/yaml/v3`
 - Circular dependency detection
@@ -58,6 +59,42 @@ func main() {
     service := config["service"].(map[string]any)
     db := service["database"].(map[string]any)
     fmt.Printf("Database: %s:%d\n", db["host"], db["port"])
+}
+```
+
+## Decoder
+
+For streaming decoding or when you need options like strict field checking, use
+`NewDecoder` instead of `Unmarshal`:
+
+```go
+file, _ := os.Open("config/app.yaml")
+defer file.Close()
+
+dec := loader.NewDecoder(file)
+dec.KnownFields(true) // error on unknown fields
+
+var config AppConfig
+if err := dec.Decode(&config); err != nil {
+    log.Fatal(err)
+}
+```
+
+The `Decoder` supports all the same `!xref` resolution as `Unmarshal`. It also
+handles multi-document YAML streams — call `Decode` repeatedly until it returns
+`io.EOF`:
+
+```go
+dec := loader.NewDecoder(file)
+
+for {
+    var doc map[string]any
+    if err := dec.Decode(&doc); err == io.EOF {
+        break
+    } else if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(doc)
 }
 ```
 
