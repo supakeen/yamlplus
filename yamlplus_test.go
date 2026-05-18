@@ -303,6 +303,22 @@ net:
 		assert.Equal(t, "no-actually-inline", net["inline"])
 	})
 
+	t.Run("map merge xref whole file", func(t *testing.T) {
+		var output map[string]any
+		input := []byte(`
+config:
+  <<: !xref "database.yaml"
+  extra: added
+`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		assert.Equal(t, 3306, config["port"])
+		assert.Equal(t, "root", config["user"])
+		assert.Equal(t, "added", config["extra"])
+	})
 }
 
 func TestXrefDoc(t *testing.T) {
