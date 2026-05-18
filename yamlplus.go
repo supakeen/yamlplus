@@ -426,10 +426,7 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 		val := node.Content[i+1]
 
 		if key.Value == "<<" {
-			toMerge, err := l.extractMapMergeTargets(val)
-			if err != nil {
-				return err
-			}
+			toMerge := l.extractMapMergeTargets(val)
 
 			if len(toMerge) > 0 {
 				node.Content = append(node.Content[:i], node.Content[i+2:]...)
@@ -484,7 +481,7 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 	return nil
 }
 
-func (l *Loader) extractMapMergeTargets(val *yaml.Node) ([]*yaml.Node, error) {
+func (l *Loader) extractMapMergeTargets(val *yaml.Node) []*yaml.Node {
 	var targets []*yaml.Node
 
 	// Follow direct alias before processing
@@ -495,7 +492,7 @@ func (l *Loader) extractMapMergeTargets(val *yaml.Node) ([]*yaml.Node, error) {
 
 	if actualVal.Tag == "!xref" || actualVal.Kind == yaml.MappingNode {
 		targets = append(targets, actualVal)
-		return targets, nil
+		return targets
 	}
 
 	if actualVal.Kind == yaml.SequenceNode {
@@ -509,7 +506,7 @@ func (l *Loader) extractMapMergeTargets(val *yaml.Node) ([]*yaml.Node, error) {
 			}
 		}
 	}
-	return targets, nil
+	return targets
 }
 
 func cloneNode(n *yaml.Node) *yaml.Node {
