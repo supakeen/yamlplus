@@ -476,6 +476,20 @@ func TestXrefNested(t *testing.T) {
 		assert.Equal(t, 3306, next["port"])
 		assert.Equal(t, "root", next["user"])
 	})
+
+	t.Run("xref nested with broken inner xref", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("merge-nested-bad.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`start: !xref "merge-nested-bad.yaml"`)
+
+		err = loader.Unmarshal(input, &output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in registry")
+	})
 }
 
 func TestXrefStackCleanup(t *testing.T) {
