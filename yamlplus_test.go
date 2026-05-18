@@ -340,6 +340,22 @@ config:
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found in registry")
 	})
+
+	t.Run("map merge inline mapping with broken nested xref", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		var output map[string]any
+		input := []byte(`
+config:
+  <<:
+    - bad: !xref "nonexistent.yaml"
+  extra: added
+`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in registry")
+	})
 }
 
 func TestXrefDoc(t *testing.T) {
