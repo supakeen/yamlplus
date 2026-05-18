@@ -2,14 +2,28 @@ package yamlplus
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type errOnSubdirFS struct {
+	fs.FS
+	errPath string
+}
+
+func (f errOnSubdirFS) Open(name string) (fs.File, error) {
+	if name == f.errPath {
+		return nil, errors.New("permission denied")
+	}
+	return f.FS.Open(name)
+}
 
 func getMockFS() fstest.MapFS {
 	baseYAML := []byte(`
@@ -653,6 +667,16 @@ nested2: !xref "dir/subdir/another.yml"
 	t.Run("recursive with invalid yaml file", func(t *testing.T) {
 		loader := NewLoader(getMockFS())
 		err := loader.RegisterRecursively("badrecurse")
+		assert.Error(t, err)
+	})
+
+	t.Run("walk error on subdirectory", func(t *testing.T) {
+		base := fstest.MapFS{
+			"root/ok.yaml":         {Data: []byte("key: value")},
+			"root/sub/nested.yaml": {Data: []byte("key: value")},
+		}
+		loader := NewLoader(errOnSubdirFS{FS: base, errPath: "root/sub"})
+		err := loader.RegisterRecursively("root")
 		assert.Error(t, err)
 	})
 
