@@ -1958,3 +1958,28 @@ func TestApplyMergeNonMapping(t *testing.T) {
 	assert.Equal(t, 0, loader.applyMerge(scalar, mapping))
 	assert.Equal(t, 0, loader.applyMerge(mapping, scalar))
 }
+
+func TestNilNodeHandling(t *testing.T) {
+	loader := NewLoader(getMockFS())
+
+	t.Run("replaceXrefs with nil", func(t *testing.T) {
+		err := loader.replaceXrefs(nil, make(map[string]bool))
+		assert.NoError(t, err)
+	})
+
+	t.Run("scanAnchors with nil", func(t *testing.T) {
+		loader.scanAnchors("test.yaml", nil)
+	})
+
+	t.Run("cloneNode with nil", func(t *testing.T) {
+		assert.Nil(t, cloneNode(nil))
+	})
+
+	t.Run("cloneNodeWithMap with nil", func(t *testing.T) {
+		assert.Nil(t, cloneNodeWithMap(nil, make(map[*yaml.Node]*yaml.Node)))
+	})
+
+	t.Run("fixAliases with nil", func(t *testing.T) {
+		fixAliases(nil, make(map[*yaml.Node]*yaml.Node))
+	})
+}
