@@ -173,6 +173,8 @@ wrapper: !xref "internal-anchors.yaml"
 		"baddir/good.yaml":           {Data: baseYAML},
 		"badrecurse/ok.yaml":         {Data: baseYAML},
 		"badrecurse/sub/broken.yaml": {Data: invalidYAML},
+		"mergecyclea.yaml":           {Data: []byte("top:\n  <<: !xref \"mergecycleb.yaml\"\n  a: 1\n")},
+		"mergecycleb.yaml":           {Data: []byte("top:\n  <<: !xref \"mergecyclea.yaml\"\n  b: 2\n")},
 	}
 }
 
@@ -393,6 +395,23 @@ func TestXrefCycle(t *testing.T) {
 		input := []byte(`start: !xref "cyclea.yaml"`)
 
 		err := loader.Unmarshal(input, &output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "circular dependency")
+	})
+
+	t.Run("xref circular through map merge", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("mergecyclea.yaml")
+		assert.NoError(t, err)
+
+		err = loader.RegisterFile("mergecycleb.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`start: !xref "mergecyclea.yaml"`)
+
+		err = loader.Unmarshal(input, &output)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "circular dependency")
 	})
