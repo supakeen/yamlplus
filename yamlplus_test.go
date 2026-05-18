@@ -175,6 +175,7 @@ wrapper: !xref "internal-anchors.yaml"
 		"badrecurse/sub/broken.yaml": {Data: invalidYAML},
 		"mergecyclea.yaml":           {Data: []byte("top:\n  <<: !xref \"mergecycleb.yaml\"\n  a: 1\n")},
 		"mergecycleb.yaml":           {Data: []byte("top:\n  <<: !xref \"mergecyclea.yaml\"\n  b: 2\n")},
+		"merge-nested-bad.yaml":      {Data: []byte("broken: !xref \"nonexistent.yaml\"\nok: true\n")},
 	}
 }
 
@@ -320,6 +321,24 @@ config:
 		assert.Equal(t, 3306, config["port"])
 		assert.Equal(t, "root", config["user"])
 		assert.Equal(t, "added", config["extra"])
+	})
+
+	t.Run("map merge xref with nested bad xref", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("merge-nested-bad.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`
+config:
+  <<: !xref "merge-nested-bad.yaml"
+  extra: added
+`)
+
+		err = loader.Unmarshal(input, &output)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in registry")
 	})
 }
 
