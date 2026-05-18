@@ -155,6 +155,8 @@ wrapper: !xref "internal-anchors.yaml"
 		"internal-alias.yaml":       {Data: internalAliasYAML},
 		"cross-anchor.yaml":         {Data: crossAnchorYAML},
 		"xref-to-anchored.yaml":     {Data: xrefToAnchoredYAML},
+		"baddir/broken.yaml":        {Data: invalidYAML},
+		"baddir/good.yaml":          {Data: baseYAML},
 	}
 }
 
@@ -569,6 +571,12 @@ config2: !xref "dir/file2.yml"
 	t.Run("non-existent directory", func(t *testing.T) {
 		loader := NewLoader(getMockFS())
 		err := loader.RegisterDirectory("nonexistent")
+		assert.Error(t, err)
+	})
+
+	t.Run("directory with invalid yaml file", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+		err := loader.RegisterDirectory("baddir")
 		assert.Error(t, err)
 	})
 
