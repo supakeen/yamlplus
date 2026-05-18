@@ -129,34 +129,36 @@ wrapper: !xref "internal-anchors.yaml"
 `)
 
 	return fstest.MapFS{
-		"base.yaml":                 {Data: baseYAML},
-		"database.yaml":             {Data: databaseYAML},
-		"multidoc.yaml":             {Data: multidocYAML},
-		"nested.yaml":               {Data: nestedYAML},
-		"cyclea.yaml":               {Data: cycleaYAML},
-		"cycleb.yaml":               {Data: cyclebYAML},
-		"empty.yaml":                {Data: emptyYAML},
-		"shared.yaml":               {Data: sharedYAML},
-		"invalid.yaml":              {Data: invalidYAML},
-		"deep.yaml":                 {Data: deepNestedYAML},
-		"mergechain.yaml":           {Data: mergeChainYAML},
-		"multidoc-empty-first.yaml": {Data: multidocEmptyFirstYAML},
-		"multidoc-anchors.yaml":     {Data: multidocWithAnchorsYAML},
-		"dir/file1.yaml":            {Data: baseYAML},
-		"dir/file2.yml":             {Data: databaseYAML},
-		"dir/file3.txt":             {Data: []byte("not yaml")},
-		"dir/subdir/nested.yaml":    {Data: sharedYAML},
-		"dir/subdir/another.yml":    {Data: nestedYAML},
-		"emptydir/.keep":            {Data: []byte("")},
-		"uppercase.YML":             {Data: uppercaseYML},
-		"mixedCase.YaML":            {Data: mixedCaseYAML},
-		"relative/path/config.yaml": {Data: baseYAML},
-		"internal-anchors.yaml":     {Data: internalAnchorsYAML},
-		"internal-alias.yaml":       {Data: internalAliasYAML},
-		"cross-anchor.yaml":         {Data: crossAnchorYAML},
-		"xref-to-anchored.yaml":     {Data: xrefToAnchoredYAML},
-		"baddir/broken.yaml":        {Data: invalidYAML},
-		"baddir/good.yaml":          {Data: baseYAML},
+		"base.yaml":                  {Data: baseYAML},
+		"database.yaml":              {Data: databaseYAML},
+		"multidoc.yaml":              {Data: multidocYAML},
+		"nested.yaml":                {Data: nestedYAML},
+		"cyclea.yaml":                {Data: cycleaYAML},
+		"cycleb.yaml":                {Data: cyclebYAML},
+		"empty.yaml":                 {Data: emptyYAML},
+		"shared.yaml":                {Data: sharedYAML},
+		"invalid.yaml":               {Data: invalidYAML},
+		"deep.yaml":                  {Data: deepNestedYAML},
+		"mergechain.yaml":            {Data: mergeChainYAML},
+		"multidoc-empty-first.yaml":  {Data: multidocEmptyFirstYAML},
+		"multidoc-anchors.yaml":      {Data: multidocWithAnchorsYAML},
+		"dir/file1.yaml":             {Data: baseYAML},
+		"dir/file2.yml":              {Data: databaseYAML},
+		"dir/file3.txt":              {Data: []byte("not yaml")},
+		"dir/subdir/nested.yaml":     {Data: sharedYAML},
+		"dir/subdir/another.yml":     {Data: nestedYAML},
+		"emptydir/.keep":             {Data: []byte("")},
+		"uppercase.YML":              {Data: uppercaseYML},
+		"mixedCase.YaML":             {Data: mixedCaseYAML},
+		"relative/path/config.yaml":  {Data: baseYAML},
+		"internal-anchors.yaml":      {Data: internalAnchorsYAML},
+		"internal-alias.yaml":        {Data: internalAliasYAML},
+		"cross-anchor.yaml":          {Data: crossAnchorYAML},
+		"xref-to-anchored.yaml":      {Data: xrefToAnchoredYAML},
+		"baddir/broken.yaml":         {Data: invalidYAML},
+		"baddir/good.yaml":           {Data: baseYAML},
+		"badrecurse/ok.yaml":         {Data: baseYAML},
+		"badrecurse/sub/broken.yaml": {Data: invalidYAML},
 	}
 }
 
@@ -646,6 +648,12 @@ nested2: !xref "dir/subdir/another.yml"
 		err = loader.Unmarshal(input, &output)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found in registry")
+	})
+
+	t.Run("recursive with invalid yaml file", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+		err := loader.RegisterRecursively("badrecurse")
+		assert.Error(t, err)
 	})
 
 	t.Run("non-existent directory", func(t *testing.T) {
