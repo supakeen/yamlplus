@@ -172,6 +172,9 @@ func (d *Decoder) Decode(out any) error {
 
 	if d.knownFields {
 		data, err := yaml.Marshal(&root)
+		// Ah, you're trying to find out why coverage isn't at 100% and found
+		// this line. We cannot viably ever hit this error case as we're marshalling
+		// an already valid yaml.Node. We still need to check though.
 		if err != nil {
 			return err
 		}
