@@ -94,6 +94,40 @@ setting: uppercase_yml
 setting: mixed_case
 `)
 
+	internalAnchorsYAML := []byte(`
+defaults: &defaults
+  timeout: 30s
+  retries: 3
+
+production:
+  <<: *defaults
+  timeout: 60s
+`)
+
+	internalAliasYAML := []byte(`
+base: &base
+  host: localhost
+  port: 8080
+
+services:
+  web: *base
+  api: *base
+`)
+
+	crossAnchorYAML := []byte(`
+shared: &shared
+  host: localhost
+  secure: true
+
+config: &config
+  connection: *shared
+  port: 8080
+`)
+
+	xrefToAnchoredYAML := []byte(`
+wrapper: !xref "internal-anchors.yaml"
+`)
+
 	return fstest.MapFS{
 		"base.yaml":                 {Data: baseYAML},
 		"database.yaml":             {Data: databaseYAML},
@@ -117,6 +151,10 @@ setting: mixed_case
 		"uppercase.YML":             {Data: uppercaseYML},
 		"mixedCase.YaML":            {Data: mixedCaseYAML},
 		"relative/path/config.yaml": {Data: baseYAML},
+		"internal-anchors.yaml":     {Data: internalAnchorsYAML},
+		"internal-alias.yaml":       {Data: internalAliasYAML},
+		"cross-anchor.yaml":         {Data: crossAnchorYAML},
+		"xref-to-anchored.yaml":     {Data: xrefToAnchoredYAML},
 	}
 }
 
@@ -1572,6 +1610,110 @@ second: !xref "base.yaml#net"
 		err = dec.Decode(&output)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "circular dependency")
+	})
+}
+
+func TestXrefInternalAnchors(t *testing.T) {
+	loader := NewLoader(getMockFS())
+
+	err := loader.RegisterFile("internal-anchors.yaml")
+	assert.NoError(t, err)
+
+	t.Run("whole file xref resolves internal aliases", func(t *testing.T) {
+		var output map[string]any
+		input := []byte(`config: !xref "internal-anchors.yaml"`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+
+		defaults := config["defaults"].(map[string]any)
+		assert.Equal(t, "30s", defaults["timeout"])
+		assert.Equal(t, 3, defaults["retries"])
+
+		production := config["production"].(map[string]any)
+		assert.Equal(t, "60s", production["timeout"])
+		assert.Equal(t, 3, production["retries"])
+	})
+
+	t.Run("anchor xref from file with internal aliases", func(t *testing.T) {
+		var output map[string]any
+		input := []byte(`config: !xref "internal-anchors.yaml#defaults"`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		assert.Equal(t, "30s", config["timeout"])
+		assert.Equal(t, 3, config["retries"])
+	})
+
+	t.Run("anchor xref resolves alias to sibling anchor in same file", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("cross-anchor.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`config: !xref "cross-anchor.yaml#config"`)
+
+		err = loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		assert.Equal(t, 8080, config["port"])
+
+		connection := config["connection"].(map[string]any)
+		assert.Equal(t, "localhost", connection["host"])
+		assert.Equal(t, true, connection["secure"])
+	})
+
+	t.Run("whole file xref resolves internal non-merge aliases", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("internal-alias.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`config: !xref "internal-alias.yaml"`)
+
+		err = loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		services := config["services"].(map[string]any)
+
+		web := services["web"].(map[string]any)
+		assert.Equal(t, "localhost", web["host"])
+		assert.Equal(t, 8080, web["port"])
+
+		api := services["api"].(map[string]any)
+		assert.Equal(t, "localhost", api["host"])
+		assert.Equal(t, 8080, api["port"])
+	})
+
+	t.Run("nested xref resolves internal anchors in target file", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		err := loader.RegisterFile("internal-anchors.yaml")
+		assert.NoError(t, err)
+
+		err = loader.RegisterFile("xref-to-anchored.yaml")
+		assert.NoError(t, err)
+
+		var output map[string]any
+		input := []byte(`config: !xref "xref-to-anchored.yaml"`)
+
+		err = loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		wrapper := config["wrapper"].(map[string]any)
+
+		production := wrapper["production"].(map[string]any)
+		assert.Equal(t, "60s", production["timeout"])
+		assert.Equal(t, 3, production["retries"])
 	})
 }
 
