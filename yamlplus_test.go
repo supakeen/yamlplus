@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 type errOnSubdirFS struct {
@@ -1946,4 +1947,14 @@ retries: 3
 		assert.Equal(t, "1s", config.Timeout)
 		assert.Equal(t, 3, config.Retries)
 	})
+}
+
+func TestApplyMergeNonMapping(t *testing.T) {
+	loader := NewLoader(getMockFS())
+
+	scalar := &yaml.Node{Kind: yaml.ScalarNode, Value: "hello"}
+	mapping := &yaml.Node{Kind: yaml.MappingNode}
+
+	assert.Equal(t, 0, loader.applyMerge(scalar, mapping))
+	assert.Equal(t, 0, loader.applyMerge(mapping, scalar))
 }
