@@ -1959,6 +1959,63 @@ func TestApplyMergeNonMapping(t *testing.T) {
 	assert.Equal(t, 0, loader.applyMerge(mapping, scalar))
 }
 
+func TestResolveDocumentNode(t *testing.T) {
+	t.Run("direct xref to document node", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		mapping := &yaml.Node{
+			Kind: yaml.MappingNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "key"},
+				{Kind: yaml.ScalarNode, Value: "value"},
+			},
+		}
+		doc := &yaml.Node{
+			Kind:    yaml.DocumentNode,
+			Content: []*yaml.Node{mapping},
+		}
+		loader.anchorRegistry["docnode.yaml"] = doc
+
+		var output map[string]any
+		input := []byte(`ref: !xref "docnode.yaml"`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+		assert.Equal(t, "value", output["ref"].(map[string]any)["key"])
+	})
+
+	t.Run("map merge xref to document node", func(t *testing.T) {
+		loader := NewLoader(getMockFS())
+
+		mapping := &yaml.Node{
+			Kind: yaml.MappingNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "merged"},
+				{Kind: yaml.ScalarNode, Value: "yes"},
+			},
+		}
+		doc := &yaml.Node{
+			Kind:    yaml.DocumentNode,
+			Content: []*yaml.Node{mapping},
+		}
+		loader.anchorRegistry["docmerge.yaml"] = doc
+
+		var output map[string]any
+		input := []byte(`
+config:
+  <<: !xref "docmerge.yaml"
+  extra: added
+`)
+
+		err := loader.Unmarshal(input, &output)
+		assert.NoError(t, err)
+
+		config := output["config"].(map[string]any)
+		assert.Equal(t, "yes", config["merged"])
+		assert.Equal(t, "added", config["extra"])
+	})
+}
+
 func TestNilNodeHandling(t *testing.T) {
 	loader := NewLoader(getMockFS())
 
