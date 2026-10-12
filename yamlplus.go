@@ -444,7 +444,10 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 
 		if key.Kind == yaml.ScalarNode && key.Value == "<<" &&
 			(key.Tag == "" || key.Tag == "!" || key.ShortTag() == "!!merge") {
-			toMerge := l.extractMapMergeTargets(val)
+			toMerge, err := l.extractMapMergeTargets(val)
+			if err != nil {
+				return err
+			}
 
 			if len(toMerge) > 0 {
 				node.Content = append(node.Content[:i], node.Content[i+2:]...)
@@ -491,6 +494,9 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 						}
 					}
 
+					if resolved.Kind != yaml.MappingNode {
+						return fmt.Errorf("map merge requires map or sequence of maps as the value")
+					}
 					newKeys += l.applyMerge(resolved, node)
 				}
 
@@ -502,32 +508,30 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 	return nil
 }
 
-func (l *Loader) extractMapMergeTargets(val *yaml.Node) []*yaml.Node {
-	var targets []*yaml.Node
-
-	// Follow direct alias before processing
+func (l *Loader) extractMapMergeTargets(val *yaml.Node) ([]*yaml.Node, error) {
 	actualVal := val
 	if val.Kind == yaml.AliasNode && val.Alias != nil {
 		actualVal = val.Alias
 	}
 
 	if actualVal.Tag == "!xref" || actualVal.Kind == yaml.MappingNode {
-		targets = append(targets, actualVal)
-		return targets
+		return []*yaml.Node{actualVal}, nil
 	}
-
-	if actualVal.Kind == yaml.SequenceNode {
-		for _, item := range actualVal.Content {
-			actualItem := item
-			if item.Kind == yaml.AliasNode && item.Alias != nil {
-				actualItem = item.Alias
-			}
-			if actualItem.Tag == "!xref" || actualItem.Kind == yaml.MappingNode {
-				targets = append(targets, actualItem)
-			}
+	if actualVal.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("map merge requires map or sequence of maps as the value")
+	}
+	var targets []*yaml.Node
+	for _, item := range actualVal.Content {
+		actualItem := item
+		if item.Kind == yaml.AliasNode && item.Alias != nil {
+			actualItem = item.Alias
 		}
+		if actualItem.Tag != "!xref" && actualItem.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("map merge requires map or sequence of maps as the value")
+		}
+		targets = append(targets, actualItem)
 	}
-	return targets
+	return targets, nil
 }
 
 // Validate alias edges before merges can turn them into Content edges.

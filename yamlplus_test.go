@@ -1938,8 +1938,8 @@ extra: ignored
 
 	t.Run("known fields with map merge xref", func(t *testing.T) {
 		input := `
+<<: !xref "base.yaml#net"
 timeout: 1s
-retries: 3
 `
 		dec := loader.NewDecoder(strings.NewReader(input))
 		dec.KnownFields(true)
@@ -2273,6 +2273,32 @@ func TestLiteralMergeKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestInvalidMergeTargets(t *testing.T) {
+	for name, input := range map[string]string{
+		"mixed sequence":     "config: {<<: [{answer: 42}, 7]}",
+		"invalid first":      "config: {<<: [7, {answer: 42}]}",
+		"scalar alias":       "scalar: &scalar 7\nconfig: {<<: [{answer: 42}, *scalar]}",
+		"scalar reference":   "config: {<<: !xref scalar.yaml, keep: true}",
+		"sequence reference": "config: {<<: !xref sequence.yaml}",
+		"null reference":     "config: {<<: !xref null.yaml}",
+		"mixed references":   "config: {<<: [!xref map.yaml, !xref scalar.yaml]}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loader := regressionLoader(t, fstest.MapFS{
+				"scalar.yaml":   {Data: []byte("42\n")},
+				"sequence.yaml": {Data: []byte("[{answer: 42}]\n")},
+				"null.yaml":     {Data: []byte("null\n")},
+				"map.yaml":      {Data: []byte("answer: 42\n")},
+			})
+			var out any
+			err := loader.Unmarshal([]byte(input), &out)
+			if err == nil || !strings.Contains(err.Error(), "map merge") {
+				t.Fatalf("expected invalid merge error, got %v (result %v)", err, out)
+			}
 		})
 	}
 }
