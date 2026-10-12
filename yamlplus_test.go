@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"os/exec"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -2039,4 +2042,36 @@ func TestNilNodeHandling(t *testing.T) {
 	t.Run("fixAliases with nil", func(t *testing.T) {
 		fixAliases(nil, make(map[*yaml.Node]*yaml.Node))
 	})
+}
+
+// Run potentially fatal cycle cases in a subprocess with a bounded stack.
+func TestRecursiveMerges(t *testing.T) {
+	if os.Getenv("YAMLPLUS_TEST_RECURSIVE_MERGES") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRecursiveMerges$")
+		cmd.Env = append(os.Environ(), "YAMLPLUS_TEST_RECURSIVE_MERGES=1")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("recursive merge subprocess failed: %v\n%s", err, output)
+		}
+		return
+	}
+	debug.SetMaxStack(128 << 10)
+	for _, input := range []string{
+		"config: &config {<<: *config, answer: 42}\n",
+		"a: &a\n  child:\n    <<: *a\n",
+	} {
+		for _, registered := range []bool{false, true} {
+			loader := NewLoader(fstest.MapFS{"cycle.yaml": {Data: []byte(input)}})
+			if registered {
+				if err := loader.RegisterFile("cycle.yaml"); err != nil {
+					t.Fatal(err)
+				}
+				input = "ref: !xref cycle.yaml"
+			}
+			var out any
+			err := loader.Unmarshal([]byte(input), &out)
+			if err == nil || !strings.Contains(err.Error(), "circular dependency") {
+				t.Errorf("expected cycle error, got %v", err)
+			}
+		}
+	}
 }

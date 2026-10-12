@@ -166,6 +166,9 @@ func (d *Decoder) Decode(out any) error {
 	}
 
 	stack := make(map[string]bool)
+	if err := validateNodeGraph(&root); err != nil {
+		return err
+	}
 	if err := d.loader.replaceXrefs(&root, stack); err != nil {
 		return err
 	}
@@ -407,6 +410,9 @@ func (l *Loader) resolveDirectXRef(node *yaml.Node, stack map[string]bool) error
 	}
 
 	clone := cloneNode(resolved)
+	if err := validateNodeGraph(clone); err != nil {
+		return err
+	}
 
 	node.Kind = clone.Kind
 	node.Style = clone.Style
@@ -460,6 +466,9 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 
 						// Clone before modifying to avoid mutating the anchor registry
 						resolved = cloneNode(resolved)
+						if err := validateNodeGraph(resolved); err != nil {
+							return err
+						}
 
 						if err := l.replaceXrefs(resolved, stack); err != nil {
 							return err
@@ -510,6 +519,34 @@ func (l *Loader) extractMapMergeTargets(val *yaml.Node) []*yaml.Node {
 		}
 	}
 	return targets
+}
+
+// Validate alias edges before merges can turn them into Content edges.
+func validateNodeGraph(root *yaml.Node) error {
+	active := make(map[*yaml.Node]bool)
+	done := make(map[*yaml.Node]bool)
+	var visit func(*yaml.Node) error
+	visit = func(node *yaml.Node) error {
+		if node == nil || done[node] {
+			return nil
+		}
+		if active[node] {
+			return fmt.Errorf("circular dependency detected: YAML alias at line %d", node.Line)
+		}
+		active[node] = true
+		if err := visit(node.Alias); err != nil {
+			return err
+		}
+		for _, child := range node.Content {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		delete(active, node)
+		done[node] = true
+		return nil
+	}
+	return visit(root)
 }
 
 func cloneNode(n *yaml.Node) *yaml.Node {
