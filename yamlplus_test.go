@@ -2302,3 +2302,24 @@ func TestInvalidMergeTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestDuplicateMergeKeys(t *testing.T) {
+	for name, input := range map[string]string{
+		"duplicate merges":             "config:\n  <<: {a: 1}\n  <<: {b: 2}\n",
+		"overridden source duplicates": "config: {<<: {a: 1, a: 2}, a: 3}",
+		"aliased source duplicates":    "base: &base {a: 1, a: 2}\nconfig: {<<: *base, a: 3}",
+		"referenced source duplicates": "config: {<<: !xref duplicate.yaml, a: 3}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loader := regressionLoader(t, fstest.MapFS{
+				"duplicate.yaml": {Data: []byte("a: 1\na: 2\n")},
+			})
+			var out any
+			err := loader.Unmarshal([]byte(input), &out)
+			var typeErr *yaml.TypeError
+			if !errors.As(err, &typeErr) || !strings.Contains(err.Error(), "already defined") {
+				t.Fatalf("expected duplicate key error, got %v", err)
+			}
+		})
+	}
+}
