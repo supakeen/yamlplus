@@ -554,24 +554,22 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 		return nil
 	}
 
-	oldToNew := make(map[*yaml.Node]*yaml.Node)
-	clone := cloneNodeWithMap(n, oldToNew)
-
-	// fix up alias pointers to point to cloned nodes
-	fixAliases(clone, oldToNew)
-
-	return clone
+	return cloneNodeWithMap(n, make(map[*yaml.Node]*yaml.Node))
 }
 
 func cloneNodeWithMap(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) *yaml.Node {
 	if n == nil {
 		return nil
 	}
+	if clone, ok := oldToNew[n]; ok {
+		return clone
+	}
 
 	clone := *n       // copy value types (Kind, Style, Tag, Value, etc.)
 	clone.Anchor = "" // Clear anchor name - cloned nodes shouldn't carry over anchor identities
 	clonePtr := &clone
 	oldToNew[n] = clonePtr
+	clone.Alias = cloneNodeWithMap(n.Alias, oldToNew)
 
 	if n.Content != nil {
 		clone.Content = make([]*yaml.Node, len(n.Content))
@@ -581,24 +579,6 @@ func cloneNodeWithMap(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) *yaml.No
 	}
 
 	return clonePtr
-}
-
-func fixAliases(n *yaml.Node, oldToNew map[*yaml.Node]*yaml.Node) {
-	if n == nil {
-		return
-	}
-
-	// If this node has an Alias pointer, remap it to the cloned version
-	if n.Alias != nil {
-		if newAlias, ok := oldToNew[n.Alias]; ok {
-			n.Alias = newAlias
-		}
-	}
-
-	// Recursively fix aliases in children
-	for _, child := range n.Content {
-		fixAliases(child, oldToNew)
-	}
 }
 
 func hasYAMLSuffix(name string) bool {

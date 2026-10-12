@@ -2039,9 +2039,6 @@ func TestNilNodeHandling(t *testing.T) {
 		assert.Nil(t, cloneNodeWithMap(nil, make(map[*yaml.Node]*yaml.Node)))
 	})
 
-	t.Run("fixAliases with nil", func(t *testing.T) {
-		fixAliases(nil, make(map[*yaml.Node]*yaml.Node))
-	})
 }
 
 // Run potentially fatal cycle cases in a subprocess with a bounded stack.
@@ -2073,5 +2070,65 @@ func TestRecursiveMerges(t *testing.T) {
 				t.Errorf("expected cycle error, got %v", err)
 			}
 		}
+	}
+}
+
+func regressionLoader(t *testing.T, files fstest.MapFS) *Loader {
+	t.Helper()
+	loader := NewLoader(files)
+	for name := range files {
+		if err := loader.RegisterFile(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return loader
+}
+
+func siblingMergeFiles(keys int) fstest.MapFS {
+	var base strings.Builder
+	base.WriteString("defaults: &defaults\n")
+	for i := 0; i < keys; i++ {
+		fmt.Fprintf(&base, "  k%d: %d\n", i, i)
+	}
+	base.WriteString("shared: &shared {<<: *defaults, nested: !xref value.yaml}\nconfig: &config {<<: *shared}\n")
+	return fstest.MapFS{
+		"base.yaml":  {Data: []byte(base.String())},
+		"value.yaml": {Data: []byte("answer: 42\n")},
+	}
+}
+
+func TestSiblingMergeAliasRegistryIsolation(t *testing.T) {
+	loader := regressionLoader(t, siblingMergeFiles(1))
+	before, err := yaml.Marshal(loader.anchorRegistry["base.yaml"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out any
+	if err := loader.Unmarshal([]byte("ref: !xref base.yaml#config"), &out); err != nil {
+		t.Fatal(err)
+	}
+	after, err := yaml.Marshal(loader.anchorRegistry["base.yaml"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("Unmarshal mutated registered nodes:\nbefore: %s\nafter: %s", before, after)
+	}
+}
+
+func TestSiblingMergeAliasesConcurrent(t *testing.T) {
+	loader := regressionLoader(t, siblingMergeFiles(1000))
+	for i := 0; i < 32; i++ {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			t.Parallel()
+			var out map[string]any
+			if err := loader.Unmarshal([]byte("ref: !xref base.yaml#config"), &out); err != nil {
+				t.Fatal(err)
+			}
+			config := out["ref"].(map[string]any)
+			if config["k999"] != 999 || config["nested"].(map[string]any)["answer"] != 42 {
+				t.Fatalf("incorrect concurrent result: %v", config)
+			}
+		})
 	}
 }
