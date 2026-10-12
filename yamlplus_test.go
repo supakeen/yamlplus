@@ -2166,3 +2166,57 @@ func TestSiblingAliasesResolveXrefs(t *testing.T) {
 		})
 	}
 }
+
+func TestKnownFieldsAliasReferences(t *testing.T) {
+	type answer struct {
+		Answer int `yaml:"answer"`
+	}
+	type pair struct {
+		Base answer `yaml:"base"`
+		Copy answer `yaml:"copy"`
+	}
+	type config struct {
+		Local  answer `yaml:"local"`
+		First  pair   `yaml:"first"`
+		Second pair   `yaml:"second"`
+	}
+	for name, input := range map[string]string{
+		"whole file":      "first: !xref base.yaml\n",
+		"sibling aliases": "first: !xref sibling.yaml#config\n",
+		"repeated file":   "first: !xref base.yaml\nsecond: !xref base.yaml\n",
+		"local collision": "local: &base {answer: 99}\nfirst: !xref base.yaml\n",
+		"merged aliases":  "first: {<<: !xref sibling.yaml#config}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loader := regressionLoader(t, fstest.MapFS{
+				"base.yaml":    {Data: []byte("base: &base {answer: 42}\ncopy: *base\n")},
+				"sibling.yaml": {Data: []byte("shared: &base {answer: 42}\nconfig: &config {base: *base, copy: *base}\n")},
+			})
+			dec := loader.NewDecoder(strings.NewReader(input))
+			dec.KnownFields(true)
+			var out config
+			if err := dec.Decode(&out); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, pair{Base: answer{42}, Copy: answer{42}}, out.First)
+			if name == "repeated file" {
+				assert.Equal(t, out.First, out.Second)
+			}
+			if name == "local collision" {
+				assert.Equal(t, 99, out.Local.Answer)
+			}
+		})
+	}
+	t.Run("unknown field through alias", func(t *testing.T) {
+		loader := regressionLoader(t, fstest.MapFS{
+			"base.yaml": {Data: []byte("shared: &shared {answer: 42, unexpected: true}\nconfig: &config {base: *shared, copy: *shared}\n")},
+		})
+		dec := loader.NewDecoder(strings.NewReader("first: !xref base.yaml#config"))
+		dec.KnownFields(true)
+		var out config
+		err := dec.Decode(&out)
+		if err == nil || !strings.Contains(err.Error(), "unexpected") {
+			t.Fatalf("expected unknown field error, got %v", err)
+		}
+	})
+}

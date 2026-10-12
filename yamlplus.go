@@ -174,10 +174,7 @@ func (d *Decoder) Decode(out any) error {
 	}
 
 	if d.knownFields {
-		data, err := yaml.Marshal(&root)
-		// Ah, you're trying to find out why coverage isn't at 100% and found
-		// this line. We cannot viably ever hit this error case as we're marshalling
-		// an already valid yaml.Node. We still need to check though.
+		data, err := yaml.Marshal(nodeForEncoding(&root))
 		if err != nil {
 			return err
 		}
@@ -548,6 +545,42 @@ func validateNodeGraph(root *yaml.Node) error {
 		delete(active, node)
 		done[node] = true
 		return nil
+	}
+	return visit(root)
+}
+
+// Emit each shared target before its aliases, assigning fresh anchor names.
+// Referenced fragments may include aliases whose definitions are outside their
+// Content subtree, and independent fragments may use the same anchor names.
+func nodeForEncoding(root *yaml.Node) *yaml.Node {
+	seen := make(map[*yaml.Node]*yaml.Node)
+	nextAnchor := 0
+	var visit func(*yaml.Node) *yaml.Node
+	visit = func(node *yaml.Node) *yaml.Node {
+		if node == nil {
+			return nil
+		}
+		if node.Kind == yaml.AliasNode {
+			return visit(node.Alias)
+		}
+		if previous, ok := seen[node]; ok {
+			if previous.Anchor == "" {
+				nextAnchor++
+				previous.Anchor = fmt.Sprintf("yamlplus%d", nextAnchor)
+			}
+			return &yaml.Node{Kind: yaml.AliasNode, Value: previous.Anchor, Alias: previous}
+		}
+		clone := *node
+		clone.Anchor = ""
+		clone.Alias = nil
+		seen[node] = &clone
+		if node.Content != nil {
+			clone.Content = make([]*yaml.Node, len(node.Content))
+			for i, child := range node.Content {
+				clone.Content[i] = visit(child)
+			}
+		}
+		return &clone
 	}
 	return visit(root)
 }
