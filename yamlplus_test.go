@@ -95,11 +95,11 @@ doc: "second"
 value: 42
 `)
 
-	// Note: This actually creates a single document with both anchors
-	// YAML multi-doc syntax is tricky - both anchors end up in the first doc
 	multidocWithAnchorsYAML := []byte(`
+---
 first: &anchor1
   value: "one"
+---
 second: &anchor2
   value: "two"
 `)
@@ -2219,4 +2219,40 @@ func TestKnownFieldsAliasReferences(t *testing.T) {
 			t.Fatalf("expected unknown field error, got %v", err)
 		}
 	})
+}
+
+func TestRegisterAllDocuments(t *testing.T) {
+	loader := regressionLoader(t, fstest.MapFS{
+		"multi.yaml": {Data: []byte("---\nfirst: 1\n---\nsecond: &later 2\n---\nlist: &list [3, 4]\n")},
+	})
+	for ref, want := range map[string]any{
+		"multi.yaml":       map[string]any{"first": 1},
+		"multi.yaml#later": 2,
+		"multi.yaml#list":  []any{3, 4},
+	} {
+		t.Run(ref, func(t *testing.T) {
+			var out any
+			if err := loader.Unmarshal([]byte("!xref "+ref), &out); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, want, out)
+		})
+	}
+}
+
+func TestRegisterFileLaterSyntaxError(t *testing.T) {
+	files := fstest.MapFS{"multi.yaml": {Data: []byte("old: &old 1\n")}}
+	loader := regressionLoader(t, files)
+	files["multi.yaml"].Data = []byte("---\nnew: &new 2\n---\nbroken: [\n")
+	if err := loader.RegisterFile("multi.yaml"); err == nil {
+		t.Fatal("expected syntax error in later document")
+	}
+	var out any
+	if err := loader.Unmarshal([]byte("!xref multi.yaml"), &out); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, map[string]any{"old": 1}, out)
+	if err := loader.Unmarshal([]byte("!xref multi.yaml#new"), &out); err == nil {
+		t.Fatal("failed registration exposed a new anchor")
+	}
 }

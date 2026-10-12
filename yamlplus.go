@@ -207,20 +207,28 @@ func (l *Loader) RegisterFile(path string) error {
 	}
 	defer f.Close()
 
-	var root yaml.Node
 	decoder := yaml.NewDecoder(f)
-	if err := decoder.Decode(&root); err != nil {
-		return err
-	}
-
-	if len(root.Content) > 0 {
-		// set up an anchor directly to the document so !xref "somefile.yaml"
-		// works
-		l.anchorRegistry[path] = root.Content[0]
-
-		for _, doc := range root.Content {
-			l.scanAnchors(path, doc)
+	registration := NewLoader(l.Filesystem)
+	documents := 0
+	for {
+		var root yaml.Node
+		if err := decoder.Decode(&root); err != nil {
+			if err == io.EOF && documents > 0 {
+				break
+			}
+			return err
 		}
+		if documents == 0 && len(root.Content) > 0 {
+			registration.anchorRegistry[path] = root.Content[0]
+		}
+		for _, doc := range root.Content {
+			registration.scanAnchors(path, doc)
+		}
+		documents++
+	}
+	// Publish only after every document has been parsed successfully.
+	for ref, node := range registration.anchorRegistry {
+		l.anchorRegistry[ref] = node
 	}
 
 	return nil
