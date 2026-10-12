@@ -321,6 +321,9 @@ func (l *Loader) replaceXrefs(node *yaml.Node, stack map[string]bool) error {
 		// recurses
 		return l.resolveDirectXRef(node, stack)
 	}
+	if node.Kind == yaml.AliasNode {
+		return l.replaceXrefs(node.Alias, stack)
+	}
 
 	if node.Kind == yaml.MappingNode {
 		if err := l.resolveMapMergeXRef(node, stack); err != nil {

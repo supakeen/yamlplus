@@ -2132,3 +2132,37 @@ func TestSiblingMergeAliasesConcurrent(t *testing.T) {
 		})
 	}
 }
+
+func TestSiblingAliasesResolveXrefs(t *testing.T) {
+	for _, merge := range []bool{false, true} {
+		t.Run(fmt.Sprintf("merge=%v", merge), func(t *testing.T) {
+			loader := regressionLoader(t, fstest.MapFS{
+				"base.yaml":  {Data: []byte("shared: &shared {nested: !xref value.yaml}\nconfig: &config {first: *shared, second: *shared}\n")},
+				"value.yaml": {Data: []byte("answer: 42\n")},
+			})
+			input := "ref: !xref base.yaml#config"
+			if merge {
+				input = "ref: {<<: !xref base.yaml#config}"
+			}
+			var out map[string]any
+			if err := loader.Unmarshal([]byte(input), &out); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]any{"nested": map[string]any{"answer": 42}}
+			config := out["ref"].(map[string]any)
+			assert.Equal(t, want, config["first"])
+			assert.Equal(t, want, config["second"])
+		})
+	}
+	for _, target := range []string{"missing.yaml", "base.yaml#config"} {
+		t.Run(target, func(t *testing.T) {
+			loader := regressionLoader(t, fstest.MapFS{
+				"base.yaml": {Data: []byte(fmt.Sprintf("shared: &shared {nested: !xref %s}\nconfig: &config {connection: *shared}\n", target))},
+			})
+			var out any
+			if err := loader.Unmarshal([]byte("ref: !xref base.yaml#config"), &out); err == nil {
+				t.Fatal("expected error from xref reached through sibling alias")
+			}
+		})
+	}
+}
