@@ -2323,3 +2323,66 @@ func TestDuplicateMergeKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterFileReplacesAnchors(t *testing.T) {
+	files := fstest.MapFS{
+		"base.yaml":  {Data: []byte("old: &old 1\nretained: &retained 10\n---\nobsolete: &obsolete 11\n")},
+		"other.yaml": {Data: []byte("old: &old 9\n")},
+	}
+	loader := regressionLoader(t, files)
+	files["base.yaml"].Data = []byte("new: &new 2\nretained: &retained 20\n---\nlater: &later 3\n")
+	if err := loader.RegisterFile("base.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"base.yaml#old", "base.yaml#obsolete"} {
+		var out any
+		if err := loader.Unmarshal([]byte("!xref "+ref), &out); err == nil {
+			t.Errorf("removed anchor %s still resolved to %v", ref, out)
+		}
+	}
+	for ref, want := range map[string]any{
+		"base.yaml":          map[string]any{"new": 2, "retained": 20},
+		"base.yaml#new":      2,
+		"base.yaml#retained": 20,
+		"base.yaml#later":    3,
+		"other.yaml#old":     9,
+	} {
+		var out any
+		if err := loader.Unmarshal([]byte("!xref "+ref), &out); err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, want, out, ref)
+	}
+	files["base.yaml"].Data = []byte("plain: true\n")
+	if err := loader.RegisterFile("base.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"base.yaml#new", "base.yaml#retained", "base.yaml#later"} {
+		var out any
+		if err := loader.Unmarshal([]byte("!xref "+ref), &out); err == nil {
+			t.Errorf("anchor %s survived replacement with an unanchored file", ref)
+		}
+	}
+}
+
+func TestFailedReregistrationPreservesAnchors(t *testing.T) {
+	for name, data := range map[string]string{
+		"empty":                  "",
+		"invalid first document": "invalid: [",
+		"invalid later document": "new: &new 2\n---\ninvalid: [",
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := fstest.MapFS{"base.yaml": {Data: []byte("old: &old 1\n")}}
+			loader := regressionLoader(t, files)
+			files["base.yaml"].Data = []byte(data)
+			if err := loader.RegisterFile("base.yaml"); err == nil {
+				t.Fatal("expected failed registration")
+			}
+			var out any
+			if err := loader.Unmarshal([]byte("!xref base.yaml#old"), &out); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, 1, out)
+		})
+	}
+}
