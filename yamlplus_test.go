@@ -2256,3 +2256,23 @@ func TestRegisterFileLaterSyntaxError(t *testing.T) {
 		t.Fatal("failed registration exposed a new anchor")
 	}
 }
+
+func TestLiteralMergeKeys(t *testing.T) {
+	for _, input := range []string{
+		`"<<": {answer: 42}`,
+		`'<<': {answer: 42}`,
+		`!!str <<: {answer: 42}`,
+		`config: {"<<": {answer: 42}, keep: true}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			var want, got any
+			if err := yaml.Unmarshal([]byte(input), &want); err != nil {
+				t.Fatal(err)
+			}
+			if err := NewLoader(fstest.MapFS{}).Unmarshal([]byte(input), &got); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}

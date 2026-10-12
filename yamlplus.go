@@ -442,7 +442,8 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 		key := node.Content[i]
 		val := node.Content[i+1]
 
-		if key.Value == "<<" {
+		if key.Kind == yaml.ScalarNode && key.Value == "<<" &&
+			(key.Tag == "" || key.Tag == "!" || key.ShortTag() == "!!merge") {
 			toMerge := l.extractMapMergeTargets(val)
 
 			if len(toMerge) > 0 {
