@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
 	"testing/fstest"
 
@@ -169,4 +171,50 @@ func TestStringSlice(t *testing.T) {
 	s.Set("a")
 	s.Set("b")
 	assert.Equal(t, "a, b", s.String())
+}
+
+type failingOutput struct {
+	writes int
+	failAt int
+	short  bool
+}
+
+func (w *failingOutput) Write(p []byte) (int, error) {
+	call := w.writes
+	w.writes++
+	if call == w.failAt {
+		if w.short {
+			return len(p) / 2, nil
+		}
+		return 0, errors.New("disk full")
+	}
+	return len(p), nil
+}
+
+func TestRunOutputErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		failAt int
+		short  bool
+	}{
+		{"first document", 0, false},
+		{"separator", 1, false},
+		{"second document", 2, false},
+		{"short document", 0, true},
+		{"short separator", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout := &failingOutput{failAt: tc.failAt, short: tc.short}
+			var stderr bytes.Buffer
+			code := run([]string{"multidoc.yaml"}, testFS(), stdout, &stderr)
+			assert.Equal(t, 1, code)
+			assert.Contains(t, stderr.String(), "error writing output")
+			message := "disk full"
+			if tc.short {
+				message = io.ErrShortWrite.Error()
+			}
+			assert.Contains(t, stderr.String(), message)
+			assert.Equal(t, tc.failAt+1, stdout.writes, "stop after the failed write")
+		})
+	}
 }

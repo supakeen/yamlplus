@@ -97,7 +97,10 @@ func run(args []string, fsys fs.FS, stdout, stderr io.Writer) int {
 		}
 
 		if docIndex > 0 {
-			fmt.Fprintln(stdout, "---")
+			if err := writeOutput(stdout, []byte("---\n")); err != nil {
+				fmt.Fprintf(stderr, "error writing output: %v\n", err)
+				return 1
+			}
 		}
 
 		out, err := yaml.Marshal(doc)
@@ -106,7 +109,10 @@ func run(args []string, fsys fs.FS, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		stdout.Write(out)
+		if err := writeOutput(stdout, out); err != nil {
+			fmt.Fprintf(stderr, "error writing output: %v\n", err)
+			return 1
+		}
 		docIndex++
 	}
 
@@ -116,4 +122,12 @@ func run(args []string, fsys fs.FS, stdout, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+func writeOutput(w io.Writer, data []byte) error {
+	n, err := w.Write(data)
+	if err == nil && n != len(data) {
+		return io.ErrShortWrite
+	}
+	return err
 }
