@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 func testFS() fstest.MapFS {
@@ -217,4 +218,34 @@ func TestRunOutputErrors(t *testing.T) {
 			assert.Equal(t, tc.failAt+1, stdout.writes, "stop after the failed write")
 		})
 	}
+}
+
+func TestRunPreservesScalarTypes(t *testing.T) {
+	files := fstest.MapFS{
+		"values.yaml": {Data: []byte("[1.0, !!binary YWJj, !duration 2s]")},
+		"input.yaml":  {Data: []byte("!xref values.yaml")},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", "values.yaml", "input.yaml"}, files, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, &stderr)
+	}
+	var out yaml.Node
+	if err := yaml.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	var tags, values []string
+	for _, n := range out.Content[0].Content {
+		tags = append(tags, n.Tag)
+		values = append(values, n.Value)
+	}
+	assert.Equal(t, []string{"!!float", "!!binary", "!duration"}, tags)
+	assert.Equal(t, []string{"1.0", "YWJj", "2s"}, values)
+}
+
+func TestRunRejectsInvalidTaggedScalar(t *testing.T) {
+	files := fstest.MapFS{"input.yaml": {Data: []byte("count: !!int invalid")}}
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 1, run([]string{"input.yaml"}, files, &stdout, &stderr))
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "error decoding document")
 }

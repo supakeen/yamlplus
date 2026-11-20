@@ -87,11 +87,18 @@ func run(args []string, fsys fs.FS, stdout, stderr io.Writer) int {
 
 	docIndex := 0
 	for {
-		var doc any
+		var doc yaml.Node
 		if err := dec.Decode(&doc); err != nil {
 			if err == io.EOF {
 				break
 			}
+			fmt.Fprintf(stderr, "error decoding document: %v\n", err)
+			return 1
+		}
+
+		// Decoding into a Node preserves tags but skips value validation.
+		var value any
+		if err := doc.Decode(&value); err != nil {
 			fmt.Fprintf(stderr, "error decoding document: %v\n", err)
 			return 1
 		}
@@ -103,7 +110,7 @@ func run(args []string, fsys fs.FS, stdout, stderr io.Writer) int {
 			}
 		}
 
-		out, err := yaml.Marshal(doc)
+		out, err := yaml.Marshal(&doc)
 		if err != nil {
 			fmt.Fprintf(stderr, "error marshaling output: %v\n", err)
 			return 1
