@@ -379,6 +379,26 @@ func (l *Loader) scanAnchors(path string, node *yaml.Node) {
 	}
 }
 
+// go-yaml rejects two scalar keys with identical text in a single mapping
+// even when their tags differ. Keep those keys in separate merge sources.
+func canInlineMergeKeys(mapping, mergeKey *yaml.Node, tags map[string]string) bool {
+	for i := 0; i < len(mapping.Content); i += 2 {
+		key := mapping.Content[i]
+		if key == mergeKey {
+			continue
+		}
+		tag := key.ShortTag()
+		if key.Kind != yaml.ScalarNode || tag == "!!merge" || tag == "!xref" {
+			return false
+		}
+		if previous, ok := tags[key.Value]; ok && previous != tag {
+			return false
+		}
+		tags[key.Value] = tag
+	}
+	return true
+}
+
 func (l *Loader) applyMerge(src, dst *yaml.Node) int {
 	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
 		return 0
@@ -458,59 +478,33 @@ func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) err
 				return err
 			}
 
-			if len(toMerge) > 0 {
-				node.Content = append(node.Content[:i], node.Content[i+2:]...)
-				newKeys := 0
-
-				// apply in sequence order, the yaml spec says that earlier items in the sequence
-				// take precedence
-				for _, src := range toMerge {
-					var resolved *yaml.Node
-
-					if src.Tag == "!xref" {
-						if stack[src.Value] {
-							return fmt.Errorf("circular dependency detected: %q", src.Value)
-						}
-
-						stack[src.Value] = true
-
-						var err error
-
-						resolved, err = l.getAnchor(src.Value)
-						if err != nil {
-							return err
-						}
-
-						if resolved.Kind == yaml.DocumentNode {
-							resolved = resolved.Content[0]
-						}
-
-						// Clone before modifying to avoid mutating the anchor registry
-						resolved = cloneNode(resolved)
-						if err := validateNodeGraph(resolved); err != nil {
-							return err
-						}
-
-						if err := l.replaceXrefs(resolved, stack); err != nil {
-							return err
-						}
-
-						delete(stack, src.Value)
-					} else {
-						resolved = src
-						if err := l.replaceXrefs(resolved, stack); err != nil {
-							return err
-						}
-					}
-
-					if resolved.Kind != yaml.MappingNode {
-						return fmt.Errorf("map merge requires map or sequence of maps as the value")
-					}
-					newKeys += l.applyMerge(resolved, node)
+			// go-yaml interprets typed and aliased keys using the destination
+			// map's key type. Keep a native merge when string comparison
+			// would discard that information.
+			tags := make(map[string]string)
+			flatten := canInlineMergeKeys(node, key, tags)
+			for _, src := range toMerge {
+				if err := l.replaceXrefs(src, stack); err != nil {
+					return err
 				}
-
-				i = i + newKeys - 2
+				if src.Kind != yaml.MappingNode {
+					return fmt.Errorf("map merge requires map or sequence of maps as the value")
+				}
+				flatten = flatten && canInlineMergeKeys(src, nil, tags)
 			}
+			if !flatten {
+				// go-yaml accepts a sequence directly but only mapping aliases.
+				if val.Kind == yaml.AliasNode && val.Alias.Kind == yaml.SequenceNode {
+					node.Content[i+1] = val.Alias
+				}
+				continue
+			}
+
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+			for _, src := range toMerge {
+				i += l.applyMerge(src, node)
+			}
+			i -= 2
 		}
 	}
 

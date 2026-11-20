@@ -2386,3 +2386,21 @@ func TestFailedReregistrationPreservesAnchors(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedAndAliasedMergeKeys(t *testing.T) {
+	loader := regressionLoader(t, fstest.MapFS{"base": {Data: []byte("{1: int}")}})
+	for _, tc := range []struct{ input, plain string }{
+		{"{<<: !xref base, '1': str}", "{<<: {1: int}, '1': str}"},
+		{"name: &key port\n<<: {*key: 42}\nkey: 80", "name: &key port\n<<: {*key: 42}\nkey: 80"},
+		{"{<<: [{<<: !xref base}, {'1': str}]}", "{<<: [{<<: {1: int}}, {'1': str}]}"},
+	} {
+		var got, want map[any]any
+		if err := yaml.Unmarshal([]byte(tc.plain), &want); err != nil {
+			t.Fatal(err)
+		}
+		if err := loader.Unmarshal([]byte(tc.input), &got); err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, want, got, tc.input)
+	}
+}
