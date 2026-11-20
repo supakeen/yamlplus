@@ -2456,3 +2456,40 @@ func TestResolvedMappingKeys(t *testing.T) {
 		assert.ErrorAs(t, loader.Unmarshal([]byte(input), &doc), &typeErr)
 	}
 }
+
+func TestRegistrationCollision(t *testing.T) {
+	files := fstest.MapFS{
+		"base":   {Data: []byte("key: &a anchor")},
+		"base#a": {Data: []byte("document")},
+	}
+	for _, order := range [][]string{{"base", "base#a"}, {"base#a", "base"}} {
+		loader := NewLoader(files)
+		if err := loader.RegisterFile(order[0]); err != nil {
+			t.Fatal(err)
+		}
+		if err := loader.RegisterFile(order[1]); err == nil {
+			t.Fatal("accepted ambiguous reference")
+		}
+		var got string
+		if err := loader.Unmarshal([]byte("!xref base#a"), &got); err != nil {
+			t.Fatal(err)
+		}
+		want := "anchor"
+		if order[0] == "base#a" {
+			want = "document"
+		}
+		assert.Equal(t, want, got)
+	}
+
+	files["base"].Data = []byte("key: &old original")
+	loader := regressionLoader(t, files)
+	files["base"].Data = []byte("key: &a collision")
+	if err := loader.RegisterFile("base"); err == nil {
+		t.Fatal("accepted ambiguous replacement")
+	}
+	var got []string
+	if err := loader.Unmarshal([]byte("[!xref base#old, !xref base#a]"), &got); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, []string{"original", "document"}, got)
+}

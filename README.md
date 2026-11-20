@@ -183,6 +183,8 @@ loader.RegisterFile("app/config.yaml")
 data := []byte(`settings: !xref "app/config.yaml"`)
 ```
 
+If a filename and an anchor produce the same reference (for example, file `base.yaml#a` and anchor `a` in `base.yaml`), registering the second file returns an error. Previously registered references remain available.
+
 ## Circular Dependency Detection
 
 The library detects circular references and returns an error:

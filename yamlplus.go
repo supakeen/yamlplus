@@ -96,7 +96,7 @@ type Loader struct {
 	Filesystem fs.FS
 
 	anchorRegistry    map[string]*yaml.Node
-	fileRegistrations map[string][]string
+	fileRegistrations map[string]map[string]struct{}
 }
 
 // NewLoader creates a new Loader that reads YAML files from the given filesystem.
@@ -111,7 +111,7 @@ func NewLoader(f fs.FS) *Loader {
 	return &Loader{
 		Filesystem:        f,
 		anchorRegistry:    make(map[string]*yaml.Node),
-		fileRegistrations: make(map[string][]string),
+		fileRegistrations: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -205,7 +205,8 @@ func (d *Decoder) Decode(out any) error {
 //
 // RegisterFile can be called multiple times with the same path. A successful
 // registration replaces all previous anchors for that file. A failed registration
-// leaves the previous registration intact.
+// leaves the previous registration intact. Registration fails if a reference
+// would be ambiguous with one already registered by another file.
 //
 // Returns an error if the file cannot be opened, read, or parsed as valid YAML.
 func (l *Loader) RegisterFile(path string) error {
@@ -235,13 +236,20 @@ func (l *Loader) RegisterFile(path string) error {
 		documents++
 	}
 	// Publish only after every document has been parsed successfully.
-	for _, ref := range l.fileRegistrations[path] {
+	previous := l.fileRegistrations[path]
+	for ref := range registration.anchorRegistry {
+		_, owned := previous[ref]
+		if _, exists := l.anchorRegistry[ref]; exists && !owned {
+			return fmt.Errorf("registering %q: reference %q already registered by another file", path, ref)
+		}
+	}
+	for ref := range previous {
 		delete(l.anchorRegistry, ref)
 	}
-	refs := make([]string, 0, len(registration.anchorRegistry))
+	refs := make(map[string]struct{}, len(registration.anchorRegistry))
 	for ref, node := range registration.anchorRegistry {
 		l.anchorRegistry[ref] = node
-		refs = append(refs, ref)
+		refs[ref] = struct{}{}
 	}
 	l.fileRegistrations[path] = refs
 
