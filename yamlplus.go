@@ -345,12 +345,23 @@ func (l *Loader) replaceXrefs(node *yaml.Node, stack map[string]bool) error {
 	}
 
 	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			if err := l.replaceXrefs(node.Content[i], stack); err != nil {
+				return err
+			}
+		}
+		if err := validateMappingKeys(node); err != nil {
+			return err
+		}
 		if err := l.resolveMapMergeXRef(node, stack); err != nil {
 			return err
 		}
 	}
 
-	for _, child := range node.Content {
+	for i, child := range node.Content {
+		if node.Kind == yaml.MappingNode && i%2 == 0 {
+			continue // Keys were resolved before merging.
+		}
 		if err := l.replaceXrefs(child, stack); err != nil {
 			return err
 		}
@@ -471,6 +482,26 @@ func (l *Loader) resolveDirectXRef(node *yaml.Node, stack map[string]bool) error
 	return err
 }
 
+// Check the resolved keys before a merge can hide duplicates.
+func validateMappingKeys(node *yaml.Node) error {
+	type keyID struct {
+		kind  yaml.Kind
+		value string
+	}
+	keys := make(map[keyID]*yaml.Node)
+	for i := 0; i < len(node.Content); i += 2 {
+		key := node.Content[i]
+		id := keyID{key.Kind, key.Value}
+		if previous, ok := keys[id]; ok {
+			return &yaml.TypeError{Errors: []string{fmt.Sprintf(
+				"line %d: mapping key %#v already defined at line %d",
+				key.Line, key.Value, previous.Line)}}
+		}
+		keys[id] = key
+	}
+	return nil
+}
+
 func (l *Loader) resolveMapMergeXRef(node *yaml.Node, stack map[string]bool) error {
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i]
@@ -542,8 +573,7 @@ func (l *Loader) extractMapMergeTargets(val *yaml.Node) ([]*yaml.Node, error) {
 	return targets, nil
 }
 
-// Validate the original graph before merge rewriting can hide duplicate keys
-// or turn recursive alias edges into Content edges.
+// Check for recursive aliases before traversing a document or referenced fragment.
 func validateNodeGraph(root *yaml.Node) error {
 	active := make(map[*yaml.Node]bool)
 	done := make(map[*yaml.Node]bool)
@@ -556,23 +586,6 @@ func validateNodeGraph(root *yaml.Node) error {
 			return fmt.Errorf("circular dependency detected: YAML alias at line %d", node.Line)
 		}
 		active[node] = true
-		if node.Kind == yaml.MappingNode {
-			type keyID struct {
-				kind  yaml.Kind
-				value string
-			}
-			keys := make(map[keyID]*yaml.Node)
-			for i := 0; i < len(node.Content); i += 2 {
-				key := node.Content[i]
-				id := keyID{key.Kind, key.Value}
-				if previous, ok := keys[id]; ok {
-					return &yaml.TypeError{Errors: []string{fmt.Sprintf(
-						"line %d: mapping key %#v already defined at line %d",
-						key.Line, key.Value, previous.Line)}}
-				}
-				keys[id] = key
-			}
-		}
 		if err := visit(node.Alias); err != nil {
 			return err
 		}

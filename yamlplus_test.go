@@ -2428,3 +2428,31 @@ func TestNodeAliasRoundTrip(t *testing.T) {
 		assert.Equal(t, []any{7, pair, 7, map[string]any{"shared": 42, "pair": pair}}, got)
 	}
 }
+
+func TestResolvedMappingKeys(t *testing.T) {
+	loader := regressionLoader(t, fstest.MapFS{
+		"k":        {Data: []byte("port")},
+		"defaults": {Data: []byte("{!xref k: 42}")},
+	})
+	for _, input := range []string{
+		"{<<: {port: 42}, !xref k: 80}",
+		"{!xref k: 80, <<: {port: 42}}",
+		"{<<: !xref defaults, port: 80}",
+	} {
+		var got map[string]int
+		if err := loader.Unmarshal([]byte(input), &got); err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, map[string]int{"port": 80}, got)
+	}
+	var got map[string]int
+	if err := loader.Unmarshal([]byte("{!xref k: 1, k: 2}"), &got); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, map[string]int{"port": 1, "k": 2}, got)
+	for _, input := range []string{"{port: 1, !xref k: 2}", "{port: 1, <<: {port: 2, !xref k: 3}}"} {
+		var doc yaml.Node
+		var typeErr *yaml.TypeError
+		assert.ErrorAs(t, loader.Unmarshal([]byte(input), &doc), &typeErr)
+	}
+}
