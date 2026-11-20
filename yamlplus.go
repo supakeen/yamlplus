@@ -175,8 +175,13 @@ func (d *Decoder) Decode(out any) error {
 		return err
 	}
 
+	resolved := &root
+	if !aliasesInScope(resolved, make(map[string]*yaml.Node)) {
+		resolved = nodeForEncoding(resolved)
+	}
+
 	if d.knownFields {
-		data, err := yaml.Marshal(nodeForEncoding(&root))
+		data, err := yaml.Marshal(resolved)
 		if err != nil {
 			return err
 		}
@@ -186,7 +191,7 @@ func (d *Decoder) Decode(out any) error {
 		return dec.Decode(out)
 	}
 
-	return root.Decode(out)
+	return resolved.Decode(out)
 }
 
 // RegisterFile reads a YAML file and registers all its anchors for cross-referencing.
@@ -581,6 +586,22 @@ func validateNodeGraph(root *yaml.Node) error {
 		return nil
 	}
 	return visit(root)
+}
+
+// YAML aliases are encoded by name and bind to the latest preceding anchor.
+func aliasesInScope(node *yaml.Node, anchors map[string]*yaml.Node) bool {
+	if node.Kind == yaml.AliasNode {
+		return anchors[node.Value] == node.Alias
+	}
+	if node.Anchor != "" {
+		anchors[node.Anchor] = node
+	}
+	for _, child := range node.Content {
+		if !aliasesInScope(child, anchors) {
+			return false
+		}
+	}
+	return true
 }
 
 // Emit each shared target before its aliases, assigning fresh anchor names.

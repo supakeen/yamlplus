@@ -2404,3 +2404,27 @@ func TestTypedAndAliasedMergeKeys(t *testing.T) {
 		assert.Equal(t, want, got, tc.input)
 	}
 }
+
+func TestNodeAliasRoundTrip(t *testing.T) {
+	loader := regressionLoader(t, fstest.MapFS{
+		"base": {Data: []byte("shared: &same 42\npair: &pair [*same, *same]")},
+	})
+	for _, strict := range []bool{false, true} {
+		dec := loader.NewDecoder(strings.NewReader("[&same 7, !xref base#pair, *same, !xref base]"))
+		dec.KnownFields(strict)
+		var doc yaml.Node
+		if err := dec.Decode(&doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err := yaml.Marshal(&doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []any
+		if err := yaml.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		pair := []any{42, 42}
+		assert.Equal(t, []any{7, pair, 7, map[string]any{"shared": 42, "pair": pair}}, got)
+	}
+}
